@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<indexer table="products">
+  <field name="name" value="info:name"/>
+  <field name="sku" value="info:sku"/>
+</indexer>

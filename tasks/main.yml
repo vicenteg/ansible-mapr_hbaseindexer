@@ -1,0 +1,120 @@
+---
+# tasks file for mapr_hbaseindexer
+
+- name: copy indexer binaries
+  copy: src=hbase-indexer-1.5.1-mapr-4.1-secure.tgz dest=/tmp/hbase-indexer-1.5.1-mapr-4.1-secure.tgz 
+
+- name: unpack indexer 
+  sudo: yes
+  sudo_user: root
+  command: tar -xzf /tmp/hbase-indexer-1.5.1-mapr-4.1-secure.tgz
+  args:
+    chdir: /opt
+    creates: /opt/hbase-indexer-1.5.1
+
+- name: change ownership of indexer home
+  file: path=/opt/hbase-indexer-1.5.1 owner='{{mapr_admin_username}}' recurse=yes state=directory
+
+- name: copy indexer sep jars to hbase lib
+  command: cp /opt/hbase-indexer-1.5.1/lib/{{item}} /opt/mapr/hbase/hbase-{{hbase_version}}/lib/{{item}}
+  with_items:
+    - hbase-sep-api-1.5.1.jar
+    - hbase-sep-impl-1.5.1-hbase0.98.jar
+    - hbase-sep-impl-common-1.5.1.jar
+    - hbase-sep-tools-1.5.1.jar
+  notify: restart hbase regionservers
+
+- name: download SolrJ jar to indexer lib dir
+  get_url:
+    url: http://central.maven.org/maven2/org/apache/solr/solr-solrj/{{solr_version}}/solr-solrj-{{solr_version}}.jar
+    dest: /opt/hbase-indexer-1.5.1/lib
+  environment: proxy_env
+
+- name: remove old SolrJ jar
+  file: state=absent path=/opt/hbase-indexer-1.5.1/lib/solr-solrj-4.4.0.jar
+
+- name: get zookeeper info
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  shell: maprcli node listzookeepers -noheader | sed -e 's/[[:space:]]*$//'
+  register: zookeepers
+
+- name: get zookeeper hostname info
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  shell: maprcli node listzookeepers -noheader | sed -e 's/\:5181//g' | sed -e 's/[[:space:]]*$//'
+  register: zookeepers_hostname_only
+
+- name: set hbase-indexer JAVA_HOME
+  lineinfile: dest=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-env.sh regexp="^export JAVA_HOME" line="export JAVA_HOME={{java_home}}"
+
+- name: remove old hbase-client jar
+  file: state=absent path=/opt/mapr/hbase/hbase-0.98.7/lib/hbase-client-0.98.7-mapr-1501-r1.jar
+
+- name: add patched hbase-client jar
+  copy: src=hbase-client-0.98.7-mapr-1501-SNAPSHOT.jar dest=/opt/mapr/hbase/hbase-0.98.7/lib/hbase-client-0.98.7-mapr-1501-r1.jar owner='{{mapr_admin_username}}'
+
+- name: edit hbase-indexer-site.xml
+  hadoop_properties: file=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-site.xml name={{item.key}} value={{item.value.value}}
+  with_dict:
+    hbaseindexer.zookeeper.connectstring:
+      value: "{{zookeepers.stdout}}"
+    hbase.zookeeper.quorum:
+      value: "{{zookeepers_hostname_only.stdout}}"
+    hbase.zookeeper.property.clientPort:
+      value: 5181
+
+- name: configure the indexer to log to files (rolling file appender, RFA)
+  lineinfile: dest=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-env.sh line="HBASE_INDEXER_ROOT_LOGGER=INFO,RFA" regexp="^HBASE_INDEXER_ROOT_LOGGER"
+
+- name: enable HBase required options
+  hadoop_properties: file=/opt/mapr/hbase/hbase-{{hbase_version}}/conf/hbase-site.xml name={{item.key}} value={{item.value.value}}
+  with_dict:
+    hbase.replication:
+      value: true
+    replication.source.ratio:
+      value: 1.0
+    replication.source.nb.capacity:
+      value: 1000
+    replication.replicationsource.implementation:
+      value: com.ngdata.sep.impl.SepReplicationSource
+    
+- name: copy sample indexer.xml
+  copy: src=indexer.xml dest=/opt/hbase-indexer-1.5.1/conf/indexer.xml mode=0644 owner={{mapr_admin_username}}
+
+- name: start indexer daemon
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  command: /opt/hbase-indexer-1.5.1/bin/hbase-indexer daemon --connection-param solr.zk={{zookeepers.stdout}}/solr --connection-param solr.collection={{solr_collection}} --zookeeper {{zookeepers.stdout}}
+  args:
+    chdir: /opt/hbase-indexer-1.5.1
+
+- name: check for indexer
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  shell: /opt/hbase-indexer-1.5.1/bin/hbase-indexer list-indexers -z {{zookeepers.stdout}} | egrep -v '^($|SLF|Number of|\s+)'
+  register: list_indexers
+  failed_when: list_indexers.rc not in (0, 1)
+
+- debug: var=list_indexers
+
+- name: create indexer from sample indexer configuration
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  run_once: yes
+  command: /opt/hbase-indexer-1.5.1/bin/hbase-indexer add-indexer -n {{indexer_name}} --indexer-conf conf/indexer.xml --connection-param solr.zk={{zookeepers.stdout}}/solr --connection-param solr.collection={{solr_collection}} --zookeeper {{zookeepers.stdout}}
+  args:
+    chdir: /opt/hbase-indexer-1.5.1
+  when: '"{{indexer_name}}" not in list_indexers.stdout'
+
+- name: copy table create/destroy scripts
+  copy: src={{item}} dest=/tmp/{{item}}
+  with_items:
+    - indexdemo_create.rb
+    - indexdemo_destroy.rb
+
+- name: create table
+  run_once: yes
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
+  shell: hbase shell < /tmp/indexdemo_create.rb
