@@ -46,6 +46,7 @@
   sudo_user: '{{mapr_admin_username}}'
   shell: maprcli node listzookeepers -noheader | sed -e 's/[[:space:]]*$//'
   register: zookeepers
+  changed_when: false
 
 - name: get zookeeper hostname info
   sudo: yes
