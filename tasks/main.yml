@@ -13,9 +13,13 @@
     creates: /opt/hbase-indexer-1.5.1
 
 - name: change ownership of indexer home
+  sudo: yes
+  sudo_user: root
   file: path=/opt/hbase-indexer-1.5.1 owner='{{mapr_admin_username}}' recurse=yes state=directory
 
 - name: copy indexer sep jars to hbase lib
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   command: cp /opt/hbase-indexer-1.5.1/lib/{{item}} /opt/mapr/hbase/hbase-{{hbase_version}}/lib/{{item}}
   with_items:
     - hbase-sep-api-1.5.1.jar
@@ -25,12 +29,16 @@
   notify: restart hbase regionservers
 
 - name: download SolrJ jar to indexer lib dir
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   get_url:
     url: http://central.maven.org/maven2/org/apache/solr/solr-solrj/{{solr_version}}/solr-solrj-{{solr_version}}.jar
     dest: /opt/hbase-indexer-1.5.1/lib
   environment: proxy_env
 
 - name: remove old SolrJ jar
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   file: state=absent path=/opt/hbase-indexer-1.5.1/lib/solr-solrj-4.4.0.jar
 
 - name: get zookeeper info
@@ -46,15 +54,23 @@
   register: zookeepers_hostname_only
 
 - name: set hbase-indexer JAVA_HOME
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   lineinfile: dest=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-env.sh regexp="^export JAVA_HOME" line="export JAVA_HOME={{java_home}}"
 
 - name: remove old hbase-client jar
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   file: state=absent path=/opt/mapr/hbase/hbase-0.98.7/lib/hbase-client-0.98.7-mapr-1501-r1.jar
 
 - name: add patched hbase-client jar
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   copy: src=hbase-client-0.98.7-mapr-1501-SNAPSHOT.jar dest=/opt/mapr/hbase/hbase-0.98.7/lib/hbase-client-0.98.7-mapr-1501-r1.jar owner='{{mapr_admin_username}}'
 
 - name: edit hbase-indexer-site.xml
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   hadoop_properties: file=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-site.xml name={{item.key}} value={{item.value.value}}
   with_dict:
     hbaseindexer.zookeeper.connectstring:
@@ -65,9 +81,13 @@
       value: 5181
 
 - name: configure the indexer to log to files (rolling file appender, RFA)
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   lineinfile: dest=/opt/hbase-indexer-1.5.1/conf/hbase-indexer-env.sh line="HBASE_INDEXER_ROOT_LOGGER=INFO,RFA" regexp="^HBASE_INDEXER_ROOT_LOGGER"
 
 - name: enable HBase required options
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   hadoop_properties: file=/opt/mapr/hbase/hbase-{{hbase_version}}/conf/hbase-site.xml name={{item.key}} value={{item.value.value}}
   with_dict:
     hbase.replication:
@@ -80,6 +100,8 @@
       value: com.ngdata.sep.impl.SepReplicationSource
     
 - name: copy sample indexer.xml
+  sudo: yes
+  sudo_user: '{{mapr_admin_username}}'
   copy: src=indexer.xml dest=/opt/hbase-indexer-1.5.1/conf/indexer.xml mode=0644 owner={{mapr_admin_username}}
 
 - name: start indexer daemon
@@ -95,8 +117,6 @@
   shell: /opt/hbase-indexer-1.5.1/bin/hbase-indexer list-indexers -z {{zookeepers.stdout}} | egrep -v '^($|SLF|Number of|\s+)'
   register: list_indexers
   failed_when: list_indexers.rc not in (0, 1)
-
-- debug: var=list_indexers
 
 - name: create indexer from sample indexer configuration
   sudo: yes
