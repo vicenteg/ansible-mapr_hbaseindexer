@@ -2,7 +2,6 @@
 # handlers file for mapr_hbaseindexer
 
 - name: restart hbase regionservers
-  sudo: yes
   sudo_user: '{{mapr_admin_username}}'
   command: maprcli node services -action restart -name hbregionserver -filter csvc==hbregionserver
 
