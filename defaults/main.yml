@@ -4,6 +4,6 @@
 hbase_version: 0.98.7
 java_home: /etc/alternatives/java_sdk
 solr_version: 4.10.3
-solr_collection: collection1
+solr_collection: my_collection
 indexer_name: product_indexer
 proxy_env: {}
